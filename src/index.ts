@@ -69,7 +69,7 @@ async function run() {
 
     var json = JSON.stringify(files);
     console.log(`*****************************`)
-    console.log(`Finished with ${files.length} movie files`);
+    console.log(`Finished with ${files.length} video files`);
     console.log(`*****************************`)
     await fs.writeFileSync('movie-data.json', json, 'utf8');
 
