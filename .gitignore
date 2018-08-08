@@ -1,0 +1,16 @@
+node_modules
+dist
+target
+build
+coverage
+typings
+maven
+tsdecl
+velocity.private.data.js
+test/e2e/screenshots
+package-lock.json
+*npm-debug.log
+.history
+.idea
+*.iml
+.yo-rc.json
