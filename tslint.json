@@ -42,7 +42,6 @@
     "arrow-parens": false, // for simple functions the parens on arrow functions are not needed
     "callable-types": true,
     "class-name": true,
-    "comment-format": [true, "check-space", "check-uppercase"],
     "interface-name": [true, "always-prefix"],
     "jsdoc-format": true,
     "max-classes-per-file": [true, 3],  // we generally recommend making one public class per file

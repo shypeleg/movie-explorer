@@ -1,65 +1,16 @@
 import { random } from './random';
-import { IPirateBayResult } from './types/pirates-types';
-import PirateBay from 'thepiratebay';
 
 import * as imdb from 'imdb-api';
 import * as globby from 'globby';
 import * as path from 'path';
 import * as sec from 'search-engine-client';
 import * as fs from 'fs';
-
+import { ISearchEngineResult, IVideo, movieFileTypes } from './types/types';
 const IMDB_API = '4fbdbb36';
-const NUMBER_OF_PAGES_TO_SEARCH = 1;
-const movieFileTypes = [
-  'mpg2',
-  'mov',
-  'avi',
-  'vob',
-  'flc',
-  'mpeg',
-  'movie',
-  'avs',
-  'xvid',
-  'webm',
-  'mv',
-  'ogg',
-  'r3d',
-  'dv',
-  'mp4',
-  'flv',
-  'm2ts',
-  'mts',
-  'wmv',
-  'mpg',
-  'divx',
-  'ogv',
-  'mxf',
-  'mkv',
-  'm2t',
-  'm4v',
-  'ts',
-  'm2v'
-];
 
-interface IFile {
-  fileName: string;
-  filePath: string;
-  searchableName: string;
-  imdbId?: string;
-  searchEngineImdbLink?: string;
-  imdbData?: imdb.Movie;
-}
-interface ISearchEngineResult {
-  engine: string;
-  search: string;
-  count: number;
-  links: string[];
-  error: boolean;
-}
-// filename =>
 async function run() {
   try {
-    let files: IFile[];
+    let files: IVideo[];
     const movieFolder = '/Users/shyp/Documents/movies';
 
     // get files from folder:
@@ -67,19 +18,19 @@ async function run() {
 
     files = await withIMDB(files);
 
-    var json = JSON.stringify(files);
-    console.log(`*****************************`)
+//    const json = JSON.stringify(files);
+    console.log(`*****************************`);
     console.log(`Finished with ${files.length} video files`);
-    console.log(`*****************************`)
-    await fs.writeFileSync('movie-data.json', json, 'utf8');
-
+    console.log(`*****************************`);
     // then save this as a db structure
+    await fs.writeFileSync('movie-data.json', JSON.stringify(files));
+
   } catch (e) {
     console.log('exception: ', e);
   }
 }
 
-const withIMDB = async (inputFiles: IFile[]) => {
+const withIMDB = async (inputFiles: IVideo[]) => {
   try {
     const options = {
       count: 1,
@@ -112,7 +63,7 @@ const withIMDB = async (inputFiles: IFile[]) => {
       return map;
     }, {});
 
-    const files: IFile[] = inputFiles.map(f => {
+    const files: IVideo[] = inputFiles.map(f => {
       const searchEngineImdbLink = movieNameToImdbDataMap[f.searchableName].imdbLink;
       const imdbId = movieNameToImdbDataMap[f.searchableName].imdbId;
       const imdbData = movieNameToImdbDataMap[f.searchableName].imdbData;
@@ -131,41 +82,29 @@ const extractImdbIdFromLink = (imdbLink: string): string => {
   }
   return undefined;
 };
-const movieFilesInFolder = async (folderName: string): Promise<IFile[]> => {
+const movieFilesInFolder = async (folderName: string): Promise<IVideo[]> => {
   const paths: string[] = await globby(folderName, {
     expandDirectories: {
       extensions: movieFileTypes
     }
   });
 
-  const files: IFile[] = paths.map(p => {
-    const basefileName = path.basename(p);
-
+  const files: IVideo[] = paths.map(filePath => {
+    const basefileName = path.basename(filePath);
+    const fileInfo = fs.statSync(filePath);
     return {
       fileName: basefileName,
-      filePath: p,
-      searchableName: clearTorrentName(path.basename(p, path.extname(p)))
+      filePath: filePath,
+      searchableName: clearTorrentName(path.basename(filePath, path.extname(filePath))),
+      fileInfo: {
+        accessTime: fileInfo.atime,
+        modifiedTime: fileInfo.mtime,
+      }
     };
   });
   return files;
 };
 
-async function getFromPirateBay(): Promise<IPirateBayResult[]> {
-  let pirateBayResults: IPirateBayResult[] = [];
-  for (let i = 0; i < NUMBER_OF_PAGES_TO_SEARCH; ++i) {
-    const pirateBayPageResults: IPirateBayResult[] = await PirateBay.search('1080p 2017 -hc -korsub', {
-      category: 'video',
-      page: i,
-      orderBy: 'seeds',
-      sortBy: 'desc'
-    });
-    pirateBayResults = pirateBayResults.concat(...pirateBayPageResults);
-    console.log('got page: ' + i + 1 + ' from piratebay');
-  }
-
-  pirateBayResults.forEach(res => (res.name = clearTorrentName(res.name)));
-  return pirateBayResults;
-}
 function clearTorrentName(name: string): string {
   let newName = name;
   if (name.search('2017') > 0) {
@@ -181,14 +120,4 @@ function clearTorrentName(name: string): string {
   return newName.replace(/\./g, ' ').trim();
 }
 
-// async function getFromIMDB(id: string): Promise<imdb.Movie> {
-//   let res: imdb.Movie;
-//   try {
-//     res = await imdb.get({id: id}, { apiKey: IMDB_API, timeout: 30000 });
-//     console.log('got movie info for imdbId: ', id);
-//   } catch (exception) {
-//     console.log('getFromIMDB:', exception);
-//   }
-//   return res;
-// }
 run();
