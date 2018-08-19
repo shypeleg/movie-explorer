@@ -10,6 +10,7 @@ export interface IVideo {
   fileInfo?: {
     accessTime: Date;
     modifiedTime: Date;
+    fileSizeMB: number;
   };
 }
 export interface ISearchEngineResult {
