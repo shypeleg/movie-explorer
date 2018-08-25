@@ -14,20 +14,25 @@ const lock = new Semaphore(10);
 async function run() {
   try {
     let files: IVideo[];
+    let previousDB: IVideo[];
     console.log('running on folder: ', process.env.FOLDER);
     const movieFolder = process.env.FOLDER;
+    const DB_FILE_NAME = 'movie-data.json';
 
+    if (fs.existsSync(DB_FILE_NAME)) {
+      previousDB = JSON.parse(fs.readFileSync(DB_FILE_NAME, 'utf8'));
+  }
     // get files from folder:
     files = await movieFilesInFolder(movieFolder);
 
     console.log(`Found ${files.length} video files!`);
-    files = await withIMDB(files);
+    files = await withIMDB(files, previousDB);
 
     console.log(`*****************************`);
     console.log(`Finished with ${files.length} video files`);
     console.log(`*****************************`);
     // then save this as a db structure
-    await fs.writeFileSync('movie-data.json', JSON.stringify(files));
+    //await fs.writeFileSync(DB_FILE_NAME, JSON.stringify(files));
   } catch (e) {
     console.log('exception: ', e);
   }
@@ -59,21 +64,16 @@ const movieFilesInFolder = async (folderName: string, minSizeMB = 200): Promise<
   return files.filter(file => file.fileInfo.fileSizeMB > minSizeMB);
 };
 
-const withIMDB = async (inputFiles: IVideo[]) => {
+const withIMDB = async (inputFiles: IVideo[], previousDB: IVideo[]) => {
   try {
-    const options = {
-      count: 1,
-      show: false,
-      debug: true,
-      wait: random(50, 150)
-    };
+
     let count = 0;
     const uniqueSearchableName = Array.from(new Set(inputFiles.map(f => f.searchableName)));
 
-    // search bing for the imdb id for each movie name and get its imdb data:
-    const withImdbResultsPromises = uniqueSearchableName.map(async movieName => {
+    // search bing for the imdb id for each movie name (or get from current db) and get its imdb data:
+    const withImdbResultsPromises = uniqueSearchableName.map(async videoName => {
       let vid = {
-        movieName,
+        videoName,
         imdbId: null,
         imdbLink: null,
         imdbData: null
@@ -82,24 +82,19 @@ const withIMDB = async (inputFiles: IVideo[]) => {
       ++count;
 
       try {
-        const searchEngineAndImdbResult: ISearchEngineResult = await sec.bing(
-          `site:imdb.com ${movieName}`,
-          options
-        );
-        if (!searchEngineAndImdbResult.error && searchEngineAndImdbResult.count > 0
-          && searchEngineAndImdbResult.links && searchEngineAndImdbResult.links.length > 0) {
-          console.log('found ', movieName);
+        let imdbId = getImdbIdFromPreviousDb(videoName, previousDB) || await getImdbIdFromSearchEngine(videoName);
 
-          const imdbId = extractImdbIdFromLink(searchEngineAndImdbResult.links[0]);
-          if (imdbId) {
-            const imdbData = await imdb.getById(imdbId, { apiKey: IMDB_API, timeout: 15000 });
-            vid = {
-              movieName,
+        if (imdbId) {
+          vid.imdbId = imdbId;
+          const imdbData = await imdb.getById(imdbId, { apiKey: IMDB_API, timeout: 15000 });
+          vid = {
+              videoName,
               imdbId,
-              imdbLink: searchEngineAndImdbResult.links[0],
+              imdbLink: imdbData.imdburl,
               imdbData
             };
-          }
+        } else {
+            console.log(`imdb api found nothing for imdb id: ${imdbId} for video: ${videoName}`);
         }
       } catch (error) {
         console.log('errrrrorrr', error);
@@ -114,7 +109,7 @@ const withIMDB = async (inputFiles: IVideo[]) => {
 
     const movieNameToImdbDataMap = withImdb.reduce((map, vid) => {
       if (vid) {
-        map[vid.movieName] = vid;
+        map[vid.videoName] = vid;
       }
       return map;
     }, {});
@@ -129,7 +124,54 @@ const withIMDB = async (inputFiles: IVideo[]) => {
     });
     return files;
   } catch (e) {
-    console.log('error while searching bing for the movies: ' + e);
+    console.log('unexpected error while searching search engines and imdb: ' + e);
+  }
+  return null;
+};
+
+const getImdbIdFromSearchEngine = async (videoName): Promise<string> => {
+  const options = {
+    count: 1,
+    show: false,
+    debug: true,
+    wait: random(50, 150)
+  };
+  let searchResults: ISearchEngineResult;
+
+  searchResults = await sec.bing(
+      `site:imdb.com ${videoName}`,
+      options
+    );
+  let result = verifySearchEngineResult(searchResults);
+  if (result) {
+    return extractImdbIdFromLink(result);
+  }
+  searchResults = await sec.duckduckgo(
+      `site:imdb.com ${videoName}`,
+      options
+    );
+  result = verifySearchEngineResult(searchResults);
+  if (result) {
+    return extractImdbIdFromLink(result);
+  }
+  console.log('search engines failed for: ', videoName);
+
+  return null;
+};
+
+const verifySearchEngineResult = (searchResults: ISearchEngineResult): string => {
+  if (!searchResults.error && searchResults.count > 0
+    && searchResults.links && searchResults.links.length > 0)  {
+      return searchResults.links[0];
+    }
+  return null;
+};
+const getImdbIdFromPreviousDb = (videoName, previousDB: IVideo[]): string => {
+  if (previousDB) {
+    const foundVid = previousDB.find(vid => vid && vid.searchableName === videoName);
+    if (foundVid) {
+      return foundVid.imdbId;
+    }
   }
   return null;
 };
@@ -137,9 +179,8 @@ const extractImdbIdFromLink = (imdbLink: string): string => {
   const regResult = new RegExp(/tt\d{7}/).exec(imdbLink);
   if (regResult && regResult[0] && regResult[0].length > 0) {
     return regResult[0];
-  } else {
-    console.log('no imdb link for:', imdbLink);
   }
+  console.log('imdb regex failed for:', imdbLink);
   return undefined;
 };
 
@@ -155,10 +196,18 @@ function clearTorrentName(name: string): string {
   if (formatRegex && formatRegex.index > 0) {
     newName = newName.substring(0, formatRegex.index);
   }
-  // Remove everything after episode names if a series:
-  //(.*?)(?:s|season|EP)\d{2}
-  const results = new RegExp(/(.*?)(?:s|season|EP|\dx)(\d{2})|(E\d{2})/, 'i').exec(newName);
+  // try to capture season and episode
+  // current - (.*?)(?:s|season|EP|\dx)(\d{2})|(E\d{2})
+
+  const results = new RegExp(/(.*?)(?:s|season|EP|(\d)x)((\d{2})(E\d{2})|(\d{2}))/, 'i').exec(newName);
   if (results && results[1] && results[1].length > 0) {
+    //console.log('results', results);
+    // console.log('0', results[0]);
+    // console.log('1', results[1]);
+    // console.log('2', results[2]);
+    // console.log('3', results[3]);
+    // console.log('4', results[4]);
+
     newName = results[1];
   }
   return newName.replace(/\./g, ' ').trim();
