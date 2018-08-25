@@ -19,6 +19,7 @@ async function run() {
 
     // get files from folder:
     files = await movieFilesInFolder(movieFolder);
+
     console.log(`Found ${files.length} video files!`);
     files = await withIMDB(files);
 
@@ -41,11 +42,13 @@ const movieFilesInFolder = async (folderName: string, minSizeMB = 200): Promise<
   const files: IVideo[] = paths.map(filePath => {
     const basefileName = path.basename(filePath);
     const fileInfo = fs.statSync(filePath);
-
+    const searchableName = clearTorrentName(path.basename(filePath, path.extname(filePath)));
+    //console.log(`${path.basename(filePath, path.extname(filePath))} --->>> : ${searchableName}`);
+    //console.log(`${searchableName}`);
     return {
       fileName: basefileName,
       filePath: filePath,
-      searchableName: clearTorrentName(path.basename(filePath, path.extname(filePath))),
+      searchableName,
       fileInfo: {
         accessTime: fileInfo.atime,
         modifiedTime: fileInfo.mtime,
@@ -69,25 +72,31 @@ const withIMDB = async (inputFiles: IVideo[]) => {
 
     // search bing for the imdb id for each movie name and get its imdb data:
     const withImdbResultsPromises = uniqueSearchableName.map(async movieName => {
-      let vid;
+      let vid = {
+        movieName,
+        imdbId: null,
+        imdbLink: null,
+        imdbData: null
+      };
       await lock.acquire();
       ++count;
 
       try {
-        const bingAndImdbResult: ISearchEngineResult = await sec.bing(
+        const searchEngineAndImdbResult: ISearchEngineResult = await sec.bing(
           `site:imdb.com ${movieName}`,
           options
         );
-
-        if (!bingAndImdbResult.error && bingAndImdbResult.count > 0) {
+        if (!searchEngineAndImdbResult.error && searchEngineAndImdbResult.count > 0
+          && searchEngineAndImdbResult.links && searchEngineAndImdbResult.links.length > 0) {
           console.log('found ', movieName);
-          const imdbId = extractImdbIdFromLink(bingAndImdbResult.links[1]);
+
+          const imdbId = extractImdbIdFromLink(searchEngineAndImdbResult.links[0]);
           if (imdbId) {
             const imdbData = await imdb.getById(imdbId, { apiKey: IMDB_API, timeout: 15000 });
             vid = {
               movieName,
               imdbId,
-              imdbLink: bingAndImdbResult.links[1],
+              imdbLink: searchEngineAndImdbResult.links[0],
               imdbData
             };
           }
@@ -136,13 +145,19 @@ const extractImdbIdFromLink = (imdbLink: string): string => {
 
 function clearTorrentName(name: string): string {
   let newName = name;
-  if (name.search('2017') > 0) {
-    newName = name.substring(0, name.search('2017') + 4);
-  } else if (name.search('2018') > 0) {
-    newName = name.substring(0, name.search('2018') + 4);
+
+  const yearRegex = new RegExp(/(^|\s|\.|\()(?:19|20)\d{2}($|\s|\.|\))/, 'i').exec(newName);
+
+  if (yearRegex && yearRegex.index > 0) {
+    newName = newName.substring(0, yearRegex.index + 5);
+  }
+  const formatRegex = new RegExp(/(^|.)(?:720p|1080p|MP4|aac|x264|brrip|MPEG4|HDTV|bluray)/).exec(newName);
+  if (formatRegex && formatRegex.index > 0) {
+    newName = newName.substring(0, formatRegex.index);
   }
   // Remove everything after episode names if a series:
-  const results = new RegExp(/(.*?)(?:s|season|EP)\d{2}/, 'i').exec(newName);
+  //(.*?)(?:s|season|EP)\d{2}
+  const results = new RegExp(/(.*?)(?:s|season|EP|\dx)(\d{2})|(E\d{2})/, 'i').exec(newName);
   if (results && results[1] && results[1].length > 0) {
     newName = results[1];
   }
