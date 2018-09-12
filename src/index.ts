@@ -8,6 +8,8 @@ import * as fs from 'fs';
 import { ISearchEngineResult, IVideo, movieFileTypes } from './types/types';
 const IMDB_API = '4fbdbb36';
 import Semaphore from 'semaphore-async-await';
+import * as watch from 'node-watch';
+
 // A Semaphore with one permit is a lock
 const lock = new Semaphore(10);
 
@@ -32,7 +34,12 @@ async function run() {
     console.log(`Finished with ${files.length} video files`);
     console.log(`*****************************`);
     // then save this as a db structure
-    //await fs.writeFileSync(DB_FILE_NAME, JSON.stringify(files));
+    await fs.writeFileSync(DB_FILE_NAME, JSON.stringify(files));
+
+    watch(process.env.FOLDER, { recursive: true }, function(evt, name) {
+      console.log('%s changed.', name);
+      console.log('evt', evt);
+    });
   } catch (e) {
     console.log('exception: ', e);
   }
@@ -137,20 +144,29 @@ const getImdbIdFromSearchEngine = async (videoName): Promise<string> => {
     wait: random(50, 150)
   };
   let searchResults: ISearchEngineResult;
-
-  searchResults = await sec.bing(
-      `site:imdb.com ${videoName}`,
+  let result: string;
+  const searchTerm = `site:imdb.com/title ${videoName}`;
+  searchResults = await sec.google(
+    searchTerm,
       options
     );
-  let result = verifySearchEngineResult(searchResults);
+  result = extractLink(searchResults);
   if (result) {
     return extractImdbIdFromLink(result);
   }
   searchResults = await sec.duckduckgo(
-      `site:imdb.com ${videoName}`,
+    searchTerm,
       options
     );
-  result = verifySearchEngineResult(searchResults);
+  result = extractLink(searchResults);
+  if (result) {
+    return extractImdbIdFromLink(result);
+  }
+  searchResults = await sec.bing(
+    searchTerm,
+      options
+    );
+  result = extractLink(searchResults);
   if (result) {
     return extractImdbIdFromLink(result);
   }
@@ -159,7 +175,7 @@ const getImdbIdFromSearchEngine = async (videoName): Promise<string> => {
   return null;
 };
 
-const verifySearchEngineResult = (searchResults: ISearchEngineResult): string => {
+const extractLink = (searchResults: ISearchEngineResult): string => {
   if (!searchResults.error && searchResults.count > 0
     && searchResults.links && searchResults.links.length > 0)  {
       return searchResults.links[0];
