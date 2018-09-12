@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as sec from 'search-engine-client';
 import * as fs from 'fs';
 import { ISearchEngineResult, IVideo, movieFileTypes } from './types/types';
-const IMDB_API = '4fbdbb36';
+const IMDB_API = 'put key here';
 import Semaphore from 'semaphore-async-await';
 import * as watch from 'node-watch';
 
